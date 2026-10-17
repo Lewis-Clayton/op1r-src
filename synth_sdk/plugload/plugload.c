@@ -30,6 +30,8 @@ const char         *op1_seq_names[OP1_SEQ_MAX];
 const op1_screen_t *op1_seq_screens[OP1_SEQ_MAX];
 const char         *op1_seq_svgs[OP1_SEQ_MAX];
 int                 op1_seq_count;
+const op1_tool_t   *op1_tools[OP1_TOOL_MAX];                   /* tool plugins, in load order */
+int                 op1_tool_count;
 extern const op1_drum_t *op1_drum;                             /* drumplus/dp_core.c: the drum engine plugin (docs/43) */
 extern const op1_engine_t *const op1_builtin_engines[];
 extern const int                 op1_builtin_engine_count;
@@ -93,6 +95,8 @@ typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t 
 #define MAX_FILES  32
 #define TOTAL_CAP  (1024u * 1024)                              /* all loaded plugins together */
 
+void plug_apply_synth(int *patch);
+extern int se_is_open(void);                                    /* screens/sampedit.c */
 static const struct { const char *name; void *addr; } exports[] = {
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_fx_page", (void *)op1_fx_page },
     { "read_fx_param_safe", (void *)read_fx_param_safe },
@@ -106,6 +110,11 @@ static const struct { const char *name; void *addr; } exports[] = {
     { "eu_fw_note_off", (void *)eu_fw_note_off }, { "eu_rec_play", (void *)&eu_rec_play },
     /* drum engine (docs/43) */
     { "dpu_sync_auto", (void *)dpu_sync_auto },
+    /* tools */
+    { "op1_overlay", (void *)op1_overlay }, { "plug_apply_synth", (void *)plug_apply_synth },
+    { "se_is_open", (void *)se_is_open }, { "op1_engines", (void *)op1_engines },
+    { "op1_engine_count", (void *)&op1_engine_count }, { "op1_fxs", (void *)op1_fxs },
+    { "op1_fx_count", (void *)&op1_fx_count },
 };
 
 /* boot report (resource monitor later): loaded count, refused count, last error, skipped by the crash marker */
@@ -361,6 +370,18 @@ static int load_one(void *db, const char *file)
             op1_seq_svgs[i] = svg;
             seq_row(DB_FACTORY(), name);
             seq_map(name);
+        }
+        if (buf) FREE(buf);
+        return r;
+    }
+    if (!r && kind == OP1P_TOOL) {                                  /* tool: keys, main loop, overlay */
+        uint8_t *mem = op1_tool_count < OP1_TOOL_MAX ? MALLOC(v.mem_size) : 0;
+        if (!mem) r = op1_tool_count < OP1_TOOL_MAX ? OP1P_E_SIZE : OP1P_E_HEADER;
+        if (!r) {
+            op1p_relocate(&v, mem, (uint32_t)mem, imp);
+            cache_sync(mem, v.mem_size);
+            total += v.mem_size;
+            op1_tools[op1_tool_count++] = (const op1_tool_t *)(mem + v.hdr->entry_off);
         }
         if (buf) FREE(buf);
         return r;
